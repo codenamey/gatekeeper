@@ -15,18 +15,18 @@ const connection = await mysql.createConnection({
     database: env.DBDATABASE
 });
 
-const genarateToken = (email, ipaddress) => {
+const generateToken = (email, ipaddress) => {
     const payload = {
         email: email,
         ipaddress: ipaddress
-      };
+    };
     
     const generatedToken = jwt.sign(
         payload,
         env.jwtSecret,
         { expiresIn: '24H' }
-      );
-      return generatedToken; 
+    );
+    return generatedToken; 
 }
 
 const checkEmailAccess = async (email) => {
@@ -82,8 +82,6 @@ app.post('/test', async (req, res) => {
     res.send('OK');
 });
 
-
-
 app.post('/verifytoken', async (req, res) => {
     const {email, token} = req.body;
     jwt.verify(token, env.jwtSecret, (err, decoded) => {
@@ -94,34 +92,32 @@ app.post('/verifytoken', async (req, res) => {
             console.log(decoded);
             const ip = decoded.ipaddress.split(':').pop(); 
             console.log({ip});
-            addIPAddress(ip);
+            addIPAddress(ip, decoded.email);
             res.send('token is valid');
         }
     });
 });
 
-  app.post('/grantaccesstoken', async (req, res) => {
-    const remoteip = req.headers['x-forwarded-for'] || req.socket.remoteAddress 
+app.post('/grantaccesstoken', async (req, res) => {
+    const remoteip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const body = req.body;
-      const {email, url} = body;
-      const result = await checkEmailAccess(email);
-      if(result.includes('not allowed')){
-        res.send("email is not allowed")
-      } else {
-        const token = genarateToken(email, remoteip);
+    const {email, url} = body;
+    const result = await checkEmailAccess(email);
+    if(result.includes('not allowed')){
+        res.send("email is not allowed");
+    } else {
+        const token = generateToken(email, remoteip);
         console.log({token});
         res.send(result);
-  
-      }
-
-  });
+    }
+});
 
 const allowedipaddress = [];
 
-const addIPAddress = (ip) => {
+const addIPAddress = (ip, email) => {
     const timestamp = new Date();
-    allowedipaddress.push({ ip, timestamp });
-    console.log(`Added IP address ${ip} at ${timestamp}`);
+    allowedipaddress.push({ ip, email, timestamp });
+    console.log(`Added IP address ${ip} with email ${email} at ${timestamp}`);
 
     // Add the IP address to iptables
     exec(`sudo iptables -I INPUT -s ${ip} -j ACCEPT`, (error, stdout, stderr) => {
@@ -142,7 +138,7 @@ const removeExpiredIPAddresses = () => {
     allowedipaddress.forEach((entry, index) => {
         const timeDiff = (now - new Date(entry.timestamp)) / 1000 / 60; // Difference in minutes
         if (timeDiff > 60) { // If more than 1 hour
-            console.log(`Removing expired IP address ${entry.ip}`);
+            console.log(`Removing expired IP address ${entry.ip} for email ${entry.email}`);
 
             // Remove the IP address from iptables
             exec(`sudo iptables -D INPUT -s ${entry.ip} -j ACCEPT`, (error, stdout, stderr) => {
@@ -165,9 +161,8 @@ const removeExpiredIPAddresses = () => {
 // Check and remove expired IP addresses every minute
 setInterval(removeExpiredIPAddresses, 60 * 1000);
 
-
-const server = app.listen(port, () => console.log(`Server is running:  ${port}!`));
+const server = app.listen(port, () => console.log(`Server is running: ${port}!`));
 console.log('Server started with variables:');
-console.log({env})
+console.log({env});
 console.log('process.env.emailbearer', process.env.emailbearer);
 export default server;
