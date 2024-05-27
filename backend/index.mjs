@@ -81,6 +81,9 @@ app.post('/test', async (req, res) => {
     console.log({body});
     res.send('OK');
 });
+app.post('/getallallowedipaddresses', async (req, res) => {
+    res.send(allowedipaddress);
+});
 
 app.post('/verifytoken', async (req, res) => {
     const {email, token} = req.body;
@@ -113,24 +116,56 @@ app.post('/grantaccesstoken', async (req, res) => {
 });
 
 const allowedipaddress = [];
+const allowedports = env.allowedports.split(',');
 
 const addIPAddress = (ip, email) => {
     const timestamp = new Date();
-    allowedipaddress.push({ ip, email, timestamp });
-    console.log(`Added IP address ${ip} with email ${email} at ${timestamp}`);
+    const existingEntry = allowedipaddress.find(entry => entry.ip === ip && entry.email === email);
+    if (existingEntry) {
+        existingEntry.timestamp = timestamp;
+        console.log(`Updated timestamp for IP address ${ip} with email ${email} at ${timestamp}`);
+    } else {
+        const emailEntries = allowedipaddress.filter(entry => entry.email === email);
+        if (emailEntries.length >= 3) {
+            // Find the oldest entry and remove it
+            emailEntries.sort((a, b) => a.timestamp - b.timestamp);
+            const oldestEntry = emailEntries[0];
+            allowedipaddress.splice(allowedipaddress.indexOf(oldestEntry), 1);
 
-    // Add the IP address to iptables
-    exec(`sudo iptables -I INPUT -s ${ip} -j ACCEPT`, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Error adding IP address to iptables: ${error.message}`);
-            return;
+            // Remove the IP address from iptables for each allowed port
+            allowedports.forEach(port => {
+                exec(`sudo iptables -D INPUT -s ${oldestEntry.ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`Error removing IP address from iptables: ${error.message}`);
+                        return;
+                    }
+                    if (stderr) {
+                        console.error(`iptables stderr: ${stderr}`);
+                        return;
+                    }
+                    console.log(`Removed oldest IP address ${oldestEntry.ip} for email ${email} from iptables port ${port}`);
+                });
+            });
         }
-        if (stderr) {
-            console.error(`iptables stderr: ${stderr}`);
-            return;
-        }
-        console.log(`iptables stdout: ${stdout}`);
-    });
+
+        allowedipaddress.push({ ip, email, timestamp });
+        console.log(`Added IP address ${ip} with email ${email} at ${timestamp}`);
+
+        // Add the IP address to iptables for each allowed port
+        allowedports.forEach(port => {
+            exec(`sudo iptables -I INPUT -s ${ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Error adding IP address to iptables: ${error.message}`);
+                    return;
+                }
+                if (stderr) {
+                    console.error(`iptables stderr: ${stderr}`);
+                    return;
+                }
+                console.log(`Added IP address ${ip} for email ${email} to iptables port ${port}`);
+            });
+        });
+    }
 };
 
 const removeExpiredIPAddresses = () => {
@@ -140,17 +175,19 @@ const removeExpiredIPAddresses = () => {
         if (timeDiff > 60) { // If more than 1 hour
             console.log(`Removing expired IP address ${entry.ip} for email ${entry.email}`);
 
-            // Remove the IP address from iptables
-            exec(`sudo iptables -D INPUT -s ${entry.ip} -j ACCEPT`, (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Error removing IP address from iptables: ${error.message}`);
-                    return;
-                }
-                if (stderr) {
-                    console.error(`iptables stderr: ${stderr}`);
-                    return;
-                }
-                console.log(`iptables stdout: ${stdout}`);
+            // Remove the IP address from iptables for each allowed port
+            allowedports.forEach(port => {
+                exec(`sudo iptables -D INPUT -s ${entry.ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`Error removing IP address from iptables: ${error.message}`);
+                        return;
+                    }
+                    if (stderr) {
+                        console.error(`iptables stderr: ${stderr}`);
+                        return;
+                    }
+                    console.log(`Removed IP address ${entry.ip} for email ${entry.email} from iptables port ${port}`);
+                });
             });
 
             allowedipaddress.splice(index, 1);
