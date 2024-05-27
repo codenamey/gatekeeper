@@ -4,8 +4,41 @@ import bodyParser from 'body-parser';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import { exec } from 'child_process';
+import sgMail from '@sendgrid/mail';
 
 let env = process.env;
+const sendGridEmail = (toemail, subject, hash) =>{
+    sgMail.setApiKey(env.SENDGRID_API_KEY);
+    const weblink = `https://customers.1702.fi/?h=${hash}`
+   const msg = {
+      "to": toemail,
+      "from": 'support@1702.fi',
+      "subject": subject,
+      "templateId": "d-a2bf8cdb66fe46ac82fa5db46c65a9ee",
+      "personalizations": [
+        {
+          "to": [{ "email": toemail }],
+          "subject": subject 
+        },
+        ],
+      "dynamicTemplateData": {
+        "toemail": toemail,
+        "to": toemail,
+        "billing_hash": weblink
+      }
+    }
+console.log({msg});
+sgMail
+.send(msg)
+.then((response) => {
+ console.log(response[0].statusCode)
+ console.log(response[0].headers)
+})
+.catch((error) => {
+console.error("error", error.response.body)
+})
+}
+
 
 // Create a connection to the database
 const connection = await mysql.createConnection({
@@ -93,6 +126,7 @@ app.post('/verifytoken', async (req, res) => {
             const ip = decoded.ipaddress.split(':').pop(); 
             console.log({ip});
             addIPAddress(ip, decoded.email);
+            sendGridEmail(email, 'Access granted', token);
             res.send('token is valid');
         }
     });
@@ -212,7 +246,7 @@ const removeExpiredIPAddresses = () => {
     const now = new Date();
     allowedipaddress.forEach((entry, index) => {
         const timeDiff = (now - new Date(entry.timestamp)) / 1000 / 60; // Difference in minutes
-        if (timeDiff > 60) { // If more than 1 hour
+        if (timeDiff > 180) { // If more than 3 hour
             console.log(`Removing expired IP address ${entry.ip} for email ${entry.email}`);
 
             // Remove the IP address from gatekeeper chain for each allowed port
