@@ -81,9 +81,6 @@ app.post('/test', async (req, res) => {
     console.log({body});
     res.send('OK');
 });
-app.post('/getallallowedipaddresses', async (req, res) => {
-    res.send(allowedipaddress);
-});
 
 app.post('/verifytoken', async (req, res) => {
     const {email, token} = req.body;
@@ -118,6 +115,49 @@ app.post('/grantaccesstoken', async (req, res) => {
 const allowedipaddress = [];
 const allowedports = env.allowedports.split(',');
 
+const setupDefaultIptables = () => {
+    // Create gatekeeper chain
+    exec(`sudo iptables -N gatekeeper`, (error, stdout, stderr) => {
+        if (error && !stderr.includes("Chain already exists")) {
+            console.error(`Error creating gatekeeper chain: ${error.message}`);
+            return;
+        }
+        if (stderr && !stderr.includes("Chain already exists")) {
+            console.error(`iptables stderr: ${stderr}`);
+            return;
+        }
+        console.log(`gatekeeper chain created or already exists`);
+    });
+
+    // Redirect INPUT traffic to gatekeeper chain
+    exec(`sudo iptables -A INPUT -j gatekeeper`, (error, stdout, stderr) => {
+        if (error && !stderr.includes("iptables: Chain already exists.")) {
+            console.error(`Error redirecting INPUT to gatekeeper: ${error.message}`);
+            return;
+        }
+        if (stderr && !stderr.includes("iptables: Chain already exists.")) {
+            console.error(`iptables stderr: ${stderr}`);
+            return;
+        }
+        console.log(`Redirected INPUT to gatekeeper chain`);
+    });
+
+    // Add default DROP rules to gatekeeper chain
+    allowedports.forEach(port => {
+        exec(`sudo iptables -A gatekeeper -p tcp --dport ${port} -j DROP`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error setting up default iptables rule for port ${port}: ${error.message}`);
+                return;
+            }
+            if (stderr) {
+                console.error(`iptables stderr: ${stderr}`);
+                return;
+            }
+            console.log(`Default iptables rule set for port ${port}: DROP`);
+        });
+    });
+};
+
 const addIPAddress = (ip, email) => {
     const timestamp = new Date();
     const existingEntry = allowedipaddress.find(entry => entry.ip === ip && entry.email === email);
@@ -132,18 +172,18 @@ const addIPAddress = (ip, email) => {
             const oldestEntry = emailEntries[0];
             allowedipaddress.splice(allowedipaddress.indexOf(oldestEntry), 1);
 
-            // Remove the IP address from iptables for each allowed port
+            // Remove the IP address from gatekeeper chain for each allowed port
             allowedports.forEach(port => {
-                exec(`sudo iptables -D INPUT -s ${oldestEntry.ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
+                exec(`sudo iptables -D gatekeeper -s ${oldestEntry.ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
                     if (error) {
-                        console.error(`Error removing IP address from iptables: ${error.message}`);
+                        console.error(`Error removing IP address from gatekeeper chain: ${error.message}`);
                         return;
                     }
                     if (stderr) {
                         console.error(`iptables stderr: ${stderr}`);
                         return;
                     }
-                    console.log(`Removed oldest IP address ${oldestEntry.ip} for email ${email} from iptables port ${port}`);
+                    console.log(`Removed oldest IP address ${oldestEntry.ip} for email ${email} from gatekeeper chain port ${port}`);
                 });
             });
         }
@@ -151,18 +191,18 @@ const addIPAddress = (ip, email) => {
         allowedipaddress.push({ ip, email, timestamp });
         console.log(`Added IP address ${ip} with email ${email} at ${timestamp}`);
 
-        // Add the IP address to iptables for each allowed port
+        // Add the IP address to gatekeeper chain for each allowed port
         allowedports.forEach(port => {
-            exec(`sudo iptables -I INPUT -s ${ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
+            exec(`sudo iptables -I gatekeeper -s ${ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
                 if (error) {
-                    console.error(`Error adding IP address to iptables: ${error.message}`);
+                    console.error(`Error adding IP address to gatekeeper chain: ${error.message}`);
                     return;
                 }
                 if (stderr) {
                     console.error(`iptables stderr: ${stderr}`);
                     return;
                 }
-                console.log(`Added IP address ${ip} for email ${email} to iptables port ${port}`);
+                console.log(`Added IP address ${ip} for email ${email} to gatekeeper chain port ${port}`);
             });
         });
     }
@@ -175,18 +215,18 @@ const removeExpiredIPAddresses = () => {
         if (timeDiff > 60) { // If more than 1 hour
             console.log(`Removing expired IP address ${entry.ip} for email ${entry.email}`);
 
-            // Remove the IP address from iptables for each allowed port
+            // Remove the IP address from gatekeeper chain for each allowed port
             allowedports.forEach(port => {
-                exec(`sudo iptables -D INPUT -s ${entry.ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
+                exec(`sudo iptables -D gatekeeper -s ${entry.ip} -p tcp --dport ${port} -j ACCEPT`, (error, stdout, stderr) => {
                     if (error) {
-                        console.error(`Error removing IP address from iptables: ${error.message}`);
+                        console.error(`Error removing IP address from gatekeeper chain: ${error.message}`);
                         return;
                     }
                     if (stderr) {
                         console.error(`iptables stderr: ${stderr}`);
                         return;
                     }
-                    console.log(`Removed IP address ${entry.ip} for email ${entry.email} from iptables port ${port}`);
+                    console.log(`Removed IP address ${entry.ip} for email ${entry.email} from gatekeeper chain port ${port}`);
                 });
             });
 
@@ -197,6 +237,9 @@ const removeExpiredIPAddresses = () => {
 
 // Check and remove expired IP addresses every minute
 setInterval(removeExpiredIPAddresses, 60 * 1000);
+
+// Set up default iptables rules
+setupDefaultIptables();
 
 const server = app.listen(port, () => console.log(`Server is running: ${port}!`));
 console.log('Server started with variables:');
