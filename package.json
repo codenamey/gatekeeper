@@ -1,0 +1,22 @@
+{
+  "dependencies": {
+    "@sendgrid/mail": "^7.7.0",
+    "@slack/events-api": "^3.0.1",
+    "body-parser": "^1.20.2",
+    "child_process": "^1.0.2",
+    "cors": "^2.8.5",
+    "docker-compose-parser": "^0.0.3",
+    "express": "^4.19.2",
+    "js-yaml": "^4.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.9.8",
+    "puppeteer": "^2.1.1",
+    "puppeteer-instagram": "^0.0.1",
+    "yaml": "^2.3.4",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4"
+  }
+}
