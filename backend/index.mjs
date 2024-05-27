@@ -15,6 +15,20 @@ const connection = await mysql.createConnection({
     database: env.DBDATABASE
 });
 
+const genarateToken = (email, ipaddress) => {
+    const payload = {
+        email: email,
+        ipaddress: ipaddress
+      };
+    
+    const generatedToken = jwt.sign(
+        payload,
+        env.jwtSecret,
+        { expiresIn: '24H' }
+      );
+      return generatedToken; 
+}
+
 const checkEmailAccess = async (email) => {
     try {
         const [results] = await connection.execute(
@@ -23,14 +37,14 @@ const checkEmailAccess = async (email) => {
         );
 
         if (results.length === 0) {
-            return "false";
+            return "not allowed";
         } else {
             return "EMAIL:" + results[0].email;
         }
     } catch (error) {
         return "error: " + error.message;
     }
-};
+}
 
 const app = express();
 const port = 3000;
@@ -67,6 +81,40 @@ app.post('/test', async (req, res) => {
     console.log({body});
     res.send('OK');
 });
+
+
+
+app.post('/verifytoken', async (req, res) => {
+    const {email, token} = req.body;
+    jwt.verify(token, env.jwtSecret, (err, decoded) => {
+        if (err) {
+            console.log(err);
+            res.send('token is not valid');
+        } else {
+            console.log(decoded);
+            const ip = decoded.ipaddress.split(':').pop(); 
+            console.log({ip});
+            addIPAddress(ip);
+            res.send('token is valid');
+        }
+    });
+});
+
+  app.post('/grantaccesstoken', async (req, res) => {
+    const remoteip = req.headers['x-forwarded-for'] || req.socket.remoteAddress 
+    const body = req.body;
+      const {email, url} = body;
+      const result = await checkEmailAccess(email);
+      if(result.includes('not allowed')){
+        res.send("email is not allowed")
+      } else {
+        const token = genarateToken(email, remoteip);
+        console.log({token});
+        res.send(result);
+  
+      }
+
+  });
 
 const allowedipaddress = [];
 
@@ -117,11 +165,9 @@ const removeExpiredIPAddresses = () => {
 // Check and remove expired IP addresses every minute
 setInterval(removeExpiredIPAddresses, 60 * 1000);
 
-const server = app.listen(port, () => {
-    console.log(`Server is running: ${port}!`);
-    console.log('Server started with variables:');
-    console.log({env});
-    console.log('process.env.emailbearer', process.env.emailbearer);
-});
 
+const server = app.listen(port, () => console.log(`Server is running:  ${port}!`));
+console.log('Server started with variables:');
+console.log({env})
+console.log('process.env.emailbearer', process.env.emailbearer);
 export default server;
